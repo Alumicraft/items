@@ -1,0 +1,13 @@
+{
+ "doctype": "Page",
+ "module": "Items",
+ "name": "items-manager",
+ "page_name": "items-manager",
+ "standard": "Yes",
+ "title": "Items Manager",
+ "roles": [
+  {
+   "role": "System Manager"
+  }
+ ]
+}

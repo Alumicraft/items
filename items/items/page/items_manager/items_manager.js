@@ -331,6 +331,7 @@ class ItemsManager {
     }
 
     confirm_delete_all() {
+        const me = this;
         let d = new frappe.ui.Dialog({
             title: 'Delete All Items',
             fields: [{
@@ -345,8 +346,8 @@ class ItemsManager {
                     return;
                 }
                 d.hide();
-                this.do_delete({ delete_all: true });
-            }.bind(this),
+                me.do_delete({ delete_all: true });
+            },
         });
         d.show();
     }

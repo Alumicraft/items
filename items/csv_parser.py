@@ -8,6 +8,7 @@ import io
 
 NAMING_SERIES = "STO-ITEM-YYYY."
 _SENTINEL = "Start entering data below this line"
+_MAX_ITEM_NAME_LEN = 140
 
 # Column indices in data rows (0-indexed, matches pipeline output format)
 _COL_ITEM_NAME = 2
@@ -49,6 +50,7 @@ def parse_csv(file_content: str) -> list[dict]:
 
     data_rows = rows[sentinel_idx + 1:]
     result = []
+    seen_codes = set()
 
     for row in data_rows:
         # Skip empty rows and rows that don't have enough columns
@@ -58,6 +60,12 @@ def parse_csv(file_content: str) -> list[dict]:
         item_name = row[_COL_ITEM_NAME].strip()
         if not item_name:
             continue
+
+        # Normalize early so we can dedup on the uppercased item_code
+        item_code = row[_COL_ITEM_CODE].strip().upper()
+        if item_code in seen_codes:
+            continue
+        seen_codes.add(item_code)
 
         result.append({
             "item_name": item_name,
@@ -76,8 +84,8 @@ def build_item_doc(row: dict) -> dict:
     Build an ERPNext Item doc dict from a parsed CSV row.
     Applies ALL CAPS normalization to name fields.
     """
-    item_name = _normalize(row["item_name"])
-    item_code = _normalize(row["item_code"])
+    item_name = _normalize(row["item_name"])[:_MAX_ITEM_NAME_LEN]
+    item_code = _normalize(row["item_code"])[:_MAX_ITEM_NAME_LEN]
     description = _normalize(row.get("description", ""))
     is_stock = 0 if row["item_group"] == "Service" else 1
 

@@ -64,13 +64,19 @@ def import_items(file_content: str, _job_id: str) -> None:
     rows = parse_csv(file_content)
     total = len(rows)
     imported = 0
+    skipped = 0
     errors = []
 
     for i, row in enumerate(rows):
         try:
-            doc = frappe.get_doc(build_item_doc(row))
-            doc.insert(ignore_permissions=True)
-            imported += 1
+            doc_dict = build_item_doc(row)
+            # Skip items that already exist in ERPNext (re-import safe)
+            if frappe.db.exists("Item", {"item_code": doc_dict["item_code"]}):
+                skipped += 1
+            else:
+                doc = frappe.get_doc(doc_dict)
+                doc.insert(ignore_permissions=True)
+                imported += 1
         except Exception as e:
             errors.append({
                 "row": i + 1,

@@ -150,7 +150,7 @@ def delete_items(item_codes: list = None, delete_all: bool = False) -> dict:
     """
     Delete items from ERPNext atomically.
     - delete_all=True: fetches all item names first, then deletes everything
-    - Linked-doc guard: refuses to delete items referenced in open Sales/Purchase Orders
+    - Linked-doc guard: skips items with any connections (orders, invoices, tax templates, etc.)
     - Returns { deleted: N, protected: [...], error: null }
     """
     import json
@@ -169,23 +169,23 @@ def delete_items(item_codes: list = None, delete_all: bool = False) -> dict:
 
     item_codes = list(item_codes)
 
-    # Linked-document guard — do not delete items in open orders
-    linked_rows = frappe.db.sql(
-        """
-        SELECT DISTINCT item_code FROM `tabSales Order Item`
-        WHERE item_code IN %(codes)s AND docstatus < 2
-        UNION
-        SELECT DISTINCT item_code FROM `tabPurchase Order Item`
-        WHERE item_code IN %(codes)s AND docstatus < 2
-        """,
-        {"codes": item_codes},
+    # Linked-document guard — skip items with ANY connection (orders, invoices, tax templates, etc.)
+    linked_names = frappe.get_all(
+        "Dynamic Link",
+        filters={
+            "link_doctype": "Item",
+            "link_name": ("in", item_codes),
+        },
+        pluck="link_name",
     )
-    protected = [r[0] for r in linked_rows]
-    if protected:
+    protected = list(set(linked_names))
+    deletable = [code for code in item_codes if code not in protected]
+
+    if not deletable:
         return {
             "deleted": 0,
             "protected": protected,
-            "error": f"{len(protected)} item(s) are referenced in open orders and cannot be deleted.",
+            "error": f"All {len(protected)} item(s) have connections and cannot be deleted." if protected else None,
         }
 
     # Atomic delete: child tables first, then parent
@@ -193,22 +193,22 @@ def delete_items(item_codes: list = None, delete_all: bool = False) -> dict:
     try:
         frappe.db.sql(
             "DELETE FROM `tabItem Supplier` WHERE parent IN %(codes)s",
-            {"codes": item_codes},
+            {"codes": deletable},
         )
         frappe.db.sql(
             "DELETE FROM `tabItem Default` WHERE parent IN %(codes)s",
-            {"codes": item_codes},
+            {"codes": deletable},
         )
         frappe.db.sql(
             "DELETE FROM `tabItem` WHERE name IN %(codes)s",
-            {"codes": item_codes},
+            {"codes": deletable},
         )
         frappe.db.commit()
     except Exception as e:
         frappe.db.rollback()
         raise
 
-    return {"deleted": len(item_codes), "protected": [], "error": None}
+    return {"deleted": len(deletable), "protected": protected, "error": None}
 
 
 @frappe.whitelist()

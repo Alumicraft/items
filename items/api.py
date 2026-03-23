@@ -265,6 +265,68 @@ _PART_NUM_PATTERNS = [
     re.compile(r'^(\d{3,}-\d{3,})$', re.IGNORECASE),
 ]
 
+# Supplier → ERPNext item_group fallback mapping
+# Used when an item can't be matched to the pipeline by name.
+# Based on pipeline data: Raw Material/Cut Materials/Shop Supplies → Material, everything else → Part
+_SUPPLIER_GROUP_MAP = {
+    # Material suppliers
+    "Competitive Metals": "Material",
+    "EARLE M. JORGENSEN COMPANY": "Material",
+    "HADCO METAL TRADING CO, LLC": "Material",
+    "Westair Gases": "Material",
+    "Uline": "Material",
+    "ZEP Manufacturing Co": "Material",
+    "Klingspor": "Material",
+    "Tiewraps.com, Inc": "Material",
+    "Prudential Overall Supply": "Material",
+    "ARC Dynamics": "Material",
+    "Peak Toolworks": "Material",
+    # Part suppliers
+    "ABABA BOLT": "Part",
+    "Ababa": "Part",
+    "Brown & Miller Racing Solutions": "Part",
+    "C&R RACING INC": "Part",
+    "CBR": "Part",
+    "CBR PERFORMANCE PRODUCTS": "Part",
+    "CMI Precision Machining": "Part",
+    "Danzio Performance": "Part",
+    "Dave Folts Transmission": "Part",
+    "FK Bearings": "Part",
+    "FiberWerx": "Part",
+    "FluidLogic/MagLock": "Part",
+    "Fortin Racing": "Part",
+    "Fox Factory": "Part",
+    "Hose & Rubber Products": "Part",
+    "Hostyle Racing Products": "Part",
+    "Howe Performance": "Part",
+    "ID Designs": "Part",
+    "Impact Racing, Inc": "Part",
+    "JETTRIM": "Part",
+    "Jackson Motorsports": "Part",
+    "Kartek": "Part",
+    "Major Performance": "Part",
+    "McDowell Performance": "Part",
+    "McMaster-Carr": "Part",
+    "Meziere Enterprises Inc": "Part",
+    "Napa Auto Parts": "Part",
+    "Norris Racing Products": "Part",
+    "OMF Performance": "Part",
+    "Off Road Warehouse": "Part",
+    "PCI": "Part",
+    "PCI Race Radios": "Part",
+    "Precision Metal Craft by Jeff Davis": "Part",
+    "ProAm Racing Products": "Part",
+    "Prowire": "Part",
+    "Pyrotect Racing Cells": "Part",
+    "R&I": "Part",
+    "RPI, INC": "Part",
+    "Redline Performance": "Part",
+    "S & S ENGINEERING": "Part",
+    "SandTires Unlimited": "Part",
+    "Swift Equipment": "Part",
+    "Weddle Industries": "Part",
+}
+
 
 def _split_part_number(name: str) -> tuple:
     """Split a part number prefix from an item name.
@@ -386,6 +448,14 @@ def cleanup_item_names() -> dict:
                 if key_norm == normalized:
                     pipeline_group = group
                     break
+        # Fallback: assign group based on supplier
+        if not pipeline_group and item.get("item_group") in ("All Item Groups", ""):
+            doc = doc or frappe.get_doc("Item", item["name"])
+            supplier = ""
+            if doc.supplier_items:
+                supplier = doc.supplier_items[0].supplier or ""
+            pipeline_group = _SUPPLIER_GROUP_MAP.get(supplier)
+
         if pipeline_group and pipeline_group != item.get("item_group"):
             doc = doc or frappe.get_doc("Item", item["name"])
             doc.item_group = pipeline_group

@@ -71,7 +71,7 @@ def import_items(file_content: str, _job_id: str) -> None:
         try:
             doc_dict = build_item_doc(row)
             # Skip items that already exist in ERPNext (re-import safe)
-            if frappe.db.exists("Item", {"item_code": doc_dict["item_code"]}):
+            if frappe.db.exists("Item", {"item_name": doc_dict["item_name"]}):
                 skipped += 1
             else:
                 doc = frappe.get_doc(doc_dict)
@@ -169,16 +169,40 @@ def delete_items(item_codes: list = None, delete_all: bool = False) -> dict:
 
     item_codes = list(item_codes)
 
-    # Linked-document guard — skip items with ANY connection (orders, invoices, tax templates, etc.)
-    linked_names = frappe.get_all(
-        "Dynamic Link",
-        filters={
-            "link_doctype": "Item",
-            "link_name": ("in", item_codes),
-        },
-        pluck="link_name",
-    )
-    protected = list(set(linked_names))
+    # Linked-document guard — skip items referenced in ANY transaction table.
+    # Dynamic Link doesn't cover ERPNext child tables, so we check each one directly.
+    linked_tables = [
+        ("tabSales Order Item", "item_code"),
+        ("tabPurchase Order Item", "item_code"),
+        ("tabSales Invoice Item", "item_code"),
+        ("tabPurchase Invoice Item", "item_code"),
+        ("tabDelivery Note Item", "item_code"),
+        ("tabPurchase Receipt Item", "item_code"),
+        ("tabStock Entry Detail", "item_code"),
+        ("tabQuotation Item", "item_code"),
+        ("tabSupplier Quotation Item", "item_code"),
+        ("tabMaterial Request Item", "item_code"),
+        ("tabBOM", "item"),
+        ("tabBOM Item", "item_code"),
+        ("tabStock Ledger Entry", "item_code"),
+        ("tabItem Price", "item_code"),
+        ("tabItem Tax", "parent"),
+        ("tabPacked Item", "item_code"),
+    ]
+
+    protected = set()
+    for table, col in linked_tables:
+        try:
+            rows = frappe.db.sql(
+                f"SELECT DISTINCT `{col}` FROM `{table}` WHERE `{col}` IN %(codes)s",
+                {"codes": item_codes},
+            )
+            protected.update(r[0] for r in rows)
+        except Exception:
+            # Table may not exist in this ERPNext setup — skip it
+            pass
+
+    protected = list(protected)
     deletable = [code for code in item_codes if code not in protected]
 
     if not deletable:

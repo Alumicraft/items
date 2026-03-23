@@ -6,7 +6,6 @@ No Frappe dependency — fully unit-testable.
 import csv
 import io
 
-NAMING_SERIES = "STO-ITEM-YYYY."
 _SENTINEL = "Start entering data below this line"
 _MAX_ITEM_NAME_LEN = 140
 
@@ -17,6 +16,7 @@ _COL_ITEM_GROUP = 4
 _COL_STOCK_UOM = 5
 _COL_COMPANY = 9
 _COL_SUPPLIER = 12
+_COL_SUPPLIER_PART_NO = 13
 
 
 def _normalize(s):
@@ -61,11 +61,16 @@ def parse_csv(file_content: str) -> list[dict]:
         if not item_name:
             continue
 
-        # Normalize early so we can dedup on the uppercased item_code
+        # Dedup on uppercased item_name (item_code may be blank for naming series)
         item_code = row[_COL_ITEM_CODE].strip().upper()
-        if item_code in seen_codes:
+        dedup_key = item_code if item_code else item_name.upper()
+        if dedup_key in seen_codes:
             continue
-        seen_codes.add(item_code)
+        seen_codes.add(dedup_key)
+
+        supplier_part_no = ""
+        if len(row) > _COL_SUPPLIER_PART_NO:
+            supplier_part_no = row[_COL_SUPPLIER_PART_NO].strip()
 
         result.append({
             "item_name": item_name,
@@ -74,6 +79,7 @@ def parse_csv(file_content: str) -> list[dict]:
             "stock_uom": row[_COL_STOCK_UOM].strip(),
             "company": row[_COL_COMPANY].strip(),
             "supplier": row[_COL_SUPPLIER].strip(),
+            "supplier_part_no": supplier_part_no,
         })
 
     return result
@@ -85,21 +91,21 @@ def build_item_doc(row: dict) -> dict:
     Applies ALL CAPS normalization to name fields.
     """
     item_name = _normalize(row["item_name"])[:_MAX_ITEM_NAME_LEN]
-    item_code = _normalize(row["item_code"])[:_MAX_ITEM_NAME_LEN]
     description = _normalize(row.get("description", ""))
     is_stock = 0 if row["item_group"] == "Service" else 1
 
     doc = {
         "doctype": "Item",
-        "naming_series": NAMING_SERIES,
         "item_name": item_name,
-        "item_code": item_code,
         "item_group": row["item_group"],
         "stock_uom": row["stock_uom"],
         "is_stock_item": is_stock,
         "item_defaults": [{"company": row["company"]}],
         "supplier_items": (
-            [{"supplier": row["supplier"]}] if row.get("supplier") else []
+            [{
+                "supplier": row["supplier"],
+                **({"supplier_part_no": row["supplier_part_no"]} if row.get("supplier_part_no") else {}),
+            }] if row.get("supplier") else []
         ),
     }
     if description:

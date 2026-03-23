@@ -85,6 +85,21 @@ def parse_csv(file_content: str) -> list[dict]:
     return result
 
 
+def _pick_item_code(item_name: str, supplier_part_no: str) -> str:
+    """Use supplier part number as item_code if it's a real part number.
+    Falls back to item_name for short/generic codes."""
+    spn = supplier_part_no.strip().upper()
+    if not spn:
+        return item_name
+    # Skip short numeric codes (material grades like 4130, 6061, model numbers)
+    if len(spn) <= 5 and spn.replace("-", "").replace(".", "").isdigit():
+        return item_name
+    # Skip pure numeric codes (not specific enough)
+    if spn.isdigit():
+        return item_name
+    return spn
+
+
 def build_item_doc(row: dict) -> dict:
     """
     Build an ERPNext Item doc dict from a parsed CSV row.
@@ -97,7 +112,7 @@ def build_item_doc(row: dict) -> dict:
     doc = {
         "doctype": "Item",
         "item_name": item_name,
-        "item_code": item_name,
+        "item_code": _pick_item_code(item_name, row.get("supplier_part_no", "")),
         "item_group": row["item_group"],
         "stock_uom": row["stock_uom"],
         "is_stock_item": is_stock,

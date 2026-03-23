@@ -317,8 +317,15 @@ def _load_pipeline_item_groups() -> dict:
         if len(row) >= 5:
             item_name = row[2].strip().upper()
             item_group = row[4].strip()
+            supplier_part_no = row[13].strip() if len(row) > 13 else ""
             if item_name and item_group:
+                # Map by current clean name
                 group_map[item_name] = item_group
+                # Also map by reconstructed old name (part_no + name)
+                # so we can match items imported before the split
+                if supplier_part_no:
+                    old_name = f"{supplier_part_no} {item_name}".upper()
+                    group_map[old_name] = item_group
 
     return group_map
 
@@ -364,12 +371,21 @@ def cleanup_item_names() -> dict:
                     if not supplier_row.supplier_part_no:
                         supplier_row.supplier_part_no = part_no
 
-        # Fix item_group from pipeline data
+        # Fix item_group from pipeline data — try multiple name formats
         lookup_name = old_name.upper()
         pipeline_group = pipeline_groups.get(lookup_name)
-        # Also try the cleaned name
         if not pipeline_group and clean_name != old_name:
             pipeline_group = pipeline_groups.get(clean_name.upper())
+        # Try normalized lookup (strip extra spaces/punctuation)
+        if not pipeline_group:
+            normalized = re.sub(r'[^\w\s]', '', lookup_name).strip()
+            normalized = re.sub(r'\s+', ' ', normalized)
+            for key, group in pipeline_groups.items():
+                key_norm = re.sub(r'[^\w\s]', '', key).strip()
+                key_norm = re.sub(r'\s+', ' ', key_norm)
+                if key_norm == normalized:
+                    pipeline_group = group
+                    break
         if pipeline_group and pipeline_group != item.get("item_group"):
             doc = doc or frappe.get_doc("Item", item["name"])
             doc.item_group = pipeline_group

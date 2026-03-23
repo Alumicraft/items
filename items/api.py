@@ -484,13 +484,21 @@ def _classify_item_group(item_name: str) -> str | None:
 
 @frappe.whitelist()
 def cleanup_item_names() -> dict:
+    """Enqueue cleanup as a background job to avoid timeout."""
+    frappe.enqueue(
+        "items.api._cleanup_item_names_worker",
+        queue="long",
+        timeout=600,
+    )
+    return {"status": "queued", "message": "Cleanup running in background. Check console logs or refresh items in a few minutes."}
+
+
+def _cleanup_item_names_worker():
     """
-    One-time cleanup for existing items:
-    - Splits part numbers out of item_name into supplier_part_no
-    - Fixes item_group based on keyword classification
-    - Deletes known junk items (Deleted QB Items)
-    - Leaves item_code untouched so existing links stay intact
-    Returns { updated: N, skipped: N, deleted: N, details: [...] }
+    Background worker: one-time cleanup for existing items.
+    - Renames old item IDs to naming series (STO-ITEM-YYYY-XXXXX)
+    - Sets item_code = sku if available, otherwise item_name
+    - Fixes item_group, capitalizes names
     """
     items = frappe.get_all(
         "Item",
@@ -527,9 +535,11 @@ def cleanup_item_names() -> dict:
             new_id = frappe.model.naming.make_autoname("STO-ITEM-.YYYY.-.#####")
             try:
                 frappe.rename_doc("Item", item_id, new_id, merge=False)
+                frappe.db.commit()
                 renamed = True
                 item_id = new_id
             except Exception as e:
+                frappe.db.rollback()
                 details.append({
                     "action": "rename_failed",
                     "old_id": item["name"],

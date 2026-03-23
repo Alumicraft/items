@@ -238,6 +238,9 @@ class ItemsManager {
                     <button id="btn-delete-all" class="btn btn-outline-danger btn-sm">
                         Delete All
                     </button>
+                    <button id="btn-cleanup" class="btn btn-outline-primary btn-sm">
+                        Fix Item Codes
+                    </button>
                 </div>
                 <div id="items-table-container"></div>
                 <div id="items-pagination" style="margin-top:12px;"></div>
@@ -252,6 +255,7 @@ class ItemsManager {
 
         this.$body.find('#btn-delete-selected').on('click', () => this.delete_selected());
         this.$body.find('#btn-delete-all').on('click', () => this.confirm_delete_all());
+        this.$body.find('#btn-cleanup').on('click', () => this.run_cleanup());
     }
 
     render_items_table(data) {
@@ -373,6 +377,25 @@ class ItemsManager {
                 }
             }
         });
+    }
+
+    run_cleanup() {
+        frappe.confirm(
+            'Fix item codes on existing items? This will set item_code to supplier part number (from SKU field) if available, otherwise item_name. Item names will also be capitalized.',
+            () => {
+                frappe.call({
+                    method: 'items.api.cleanup_item_names',
+                    callback: r => {
+                        const res = r.message;
+                        frappe.show_alert({
+                            message: `${res.updated} item(s) updated, ${res.skipped} skipped`,
+                            indicator: 'green',
+                        });
+                        this.load_items(1);
+                    }
+                });
+            }
+        );
     }
 
     // ─── TAB 3: REVIEW QUEUE ─────────────────────────────────────────────────

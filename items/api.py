@@ -543,6 +543,15 @@ def cleanup_item_names() -> dict:
             doc.item_name = current_name.upper()[:140]
             changed = True
 
+        # Fix item_code: use sku (supplier part number) if available, otherwise item_name
+        doc = doc or frappe.get_doc("Item", item["name"])
+        current_code = doc.item_code or ""
+        sku = (doc.sku or "").strip().upper() if hasattr(doc, "sku") else ""
+        desired_code = sku if sku else doc.item_name
+        if desired_code and current_code != desired_code:
+            doc.item_code = desired_code[:140]
+            changed = True
+
         # Fix item_group if stuck in "All Item Groups" or empty
         if item.get("item_group") in ("All Item Groups", ""):
             new_group = _classify_item_group(old_name)

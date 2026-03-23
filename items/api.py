@@ -543,15 +543,6 @@ def cleanup_item_names() -> dict:
             doc.item_name = current_name.upper()[:140]
             changed = True
 
-        # Assign STO-ITEM code if item_code doesn't follow naming series
-        current_code = item.get("item_code") or ""
-        if not current_code.startswith("STO-ITEM-"):
-            doc = doc or frappe.get_doc("Item", item["name"])
-            # Get next number from the naming series
-            new_code = frappe.model.naming.make_autoname("STO-ITEM-.YYYY.-.#####")
-            doc.item_code = new_code
-            changed = True
-
         # Fix item_group if stuck in "All Item Groups" or empty
         if item.get("item_group") in ("All Item Groups", ""):
             new_group = _classify_item_group(old_name)

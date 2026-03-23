@@ -259,8 +259,10 @@ _PART_NUM_PATTERNS = [
     re.compile(r'^([A-Z]{1,5}\d+[A-Z0-9]*-[A-Z0-9-]+)\s+(.+)', re.IGNORECASE),
     re.compile(r'^([A-Z]+\d+[A-Z]+\d*[A-Z]*)\s+(.+)', re.IGNORECASE),
     re.compile(r'^(\d+-[A-Z][A-Z0-9]+)\s+(.+)', re.IGNORECASE),
-    re.compile(r'^(\d{3,}-\d{4,})(?:\s+-?\s*(.+))?$', re.IGNORECASE),
-    re.compile(r'^(\d{3,}-\d{4,})$', re.IGNORECASE),
+    re.compile(r'^(\d{3}-\d{2,}-[\w-]+)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(\d{3}-\d{2,}-[\w-]+)$', re.IGNORECASE),
+    re.compile(r'^(\d{3,}-\d{3,})(?:\s+-?\s*(.+))?$', re.IGNORECASE),
+    re.compile(r'^(\d{3,}-\d{3,})$', re.IGNORECASE),
 ]
 
 

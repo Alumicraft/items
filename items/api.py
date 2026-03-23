@@ -552,6 +552,9 @@ def cleanup_item_names() -> dict:
                 changed = True
 
         if changed:
+            # Fix negative values that block save
+            if hasattr(doc, "last_purchase_rate") and (doc.last_purchase_rate or 0) < 0:
+                doc.last_purchase_rate = 0
             doc.flags.ignore_validate = True
             doc.save(ignore_permissions=True)
             updated += 1

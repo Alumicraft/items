@@ -235,6 +235,101 @@ def delete_items(item_codes: list = None, delete_all: bool = False) -> dict:
     return {"deleted": len(deletable), "protected": protected, "error": None}
 
 
+# ── Part number splitting (mirrors pipeline/stage8_validate.py patterns) ──
+import re
+
+_PART_NUM_PATTERNS = [
+    re.compile(r'^(PRM-[A-Z0-9-]+)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(CL-[A-Z]+-[A-Z0-9]+)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(BHP-[A-Z0-9]+)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(BRG-\d+)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(FK-[A-Z0-9-]+)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(FKB\s+[A-Z0-9]+)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(H-AN[0-9A-Z-]+)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(ASC-\d{3}[A-Z0-9]*)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(KTK[\s-][A-Z0-9-]+)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(IDI\d+-\d+)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(XRP\d+)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(MTX\d+[A-Z]*)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(SPR\s+\d+[A-Z0-9]*)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(ORW\d+-\d+)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(MS[0-9]{4,}-[0-9]+)(?:\s+(.+))?$', re.IGNORECASE),
+    re.compile(r'^(\d{4,}[A-Z]\d{2,})\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(PP\d+[A-Z0-9.-]+)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^([A-Z]{1,5}\d+[A-Z0-9]*-[A-Z0-9-]+)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^([A-Z]+\d+[A-Z]+\d*[A-Z]*)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(\d+-[A-Z][A-Z0-9]+)\s+(.+)', re.IGNORECASE),
+    re.compile(r'^(\d{3,}-\d{4,})(?:\s+-?\s*(.+))?$', re.IGNORECASE),
+    re.compile(r'^(\d{3,}-\d{4,})$', re.IGNORECASE),
+]
+
+
+def _split_part_number(name: str) -> tuple:
+    """Split a part number prefix from an item name.
+    Returns (clean_name, supplier_part_no).
+    """
+    for pattern in _PART_NUM_PATTERNS:
+        m = pattern.match(name)
+        if m:
+            part_num = m.group(1).strip()
+            description = (m.group(2) or "").strip().lstrip("- ").strip()
+            if not description:
+                return (name, part_num)
+            return (description, part_num)
+    return (name, "")
+
+
+@frappe.whitelist()
+def cleanup_item_names() -> dict:
+    """
+    One-time cleanup: split part numbers out of existing item names.
+    - Updates item_name to the clean version
+    - Adds supplier_part_no to the Item Supplier child table
+    - Leaves item_code untouched so existing links stay intact
+    Returns { updated: N, skipped: N, details: [...] }
+    """
+    items = frappe.get_all(
+        "Item",
+        fields=["name", "item_name", "item_code"],
+        limit_page_length=0,
+    )
+
+    updated = 0
+    skipped = 0
+    details = []
+
+    for item in items:
+        old_name = item.get("item_name") or ""
+        clean_name, part_no = _split_part_number(old_name)
+
+        # Skip if no part number found or name didn't change
+        if not part_no or clean_name == old_name:
+            skipped += 1
+            continue
+
+        doc = frappe.get_doc("Item", item["name"])
+        doc.item_name = clean_name.upper()[:140]
+
+        # Add supplier_part_no to existing supplier rows
+        if part_no and doc.supplier_items:
+            for supplier_row in doc.supplier_items:
+                if not supplier_row.supplier_part_no:
+                    supplier_row.supplier_part_no = part_no
+
+        doc.save(ignore_permissions=True)
+        updated += 1
+        details.append({
+            "item_code": item["item_code"],
+            "old_name": old_name,
+            "new_name": clean_name.upper()[:140],
+            "supplier_part_no": part_no,
+        })
+
+    frappe.db.commit()
+
+    return {"updated": updated, "skipped": skipped, "details": details}
+
+
 @frappe.whitelist()
 def get_review_queue() -> list:
     """

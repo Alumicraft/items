@@ -393,6 +393,51 @@ def _load_pipeline_item_groups() -> dict:
 
 
 @frappe.whitelist()
+def cleanup_debug() -> dict:
+    """Debug: show what cleanup sees for the first 5 items in All Item Groups."""
+    import os
+
+    path = frappe.conf.get("items_pipeline_output_path")
+    csv_exists = False
+    if path:
+        csv_path = os.path.join(path, "item_master.csv")
+        csv_exists = os.path.exists(csv_path)
+
+    pipeline_groups = _load_pipeline_item_groups()
+
+    items = frappe.get_all(
+        "Item",
+        fields=["name", "item_name", "item_code", "item_group"],
+        filters={"item_group": "All Item Groups"},
+        limit_page_length=5,
+    )
+
+    debug_items = []
+    for item in items:
+        doc = frappe.get_doc("Item", item["name"])
+        suppliers = [s.supplier for s in doc.supplier_items] if doc.supplier_items else []
+        supplier = suppliers[0] if suppliers else ""
+        supplier_in_map = supplier in _SUPPLIER_GROUP_MAP
+        mapped_group = _SUPPLIER_GROUP_MAP.get(supplier, "NOT FOUND")
+
+        debug_items.append({
+            "item_name": item["item_name"],
+            "item_group": item["item_group"],
+            "suppliers": suppliers,
+            "supplier_in_map": supplier_in_map,
+            "mapped_group": mapped_group,
+        })
+
+    return {
+        "pipeline_output_path": path or "NOT SET",
+        "csv_exists": csv_exists,
+        "pipeline_groups_count": len(pipeline_groups),
+        "total_all_item_groups": frappe.db.count("Item", {"item_group": "All Item Groups"}),
+        "sample_items": debug_items,
+    }
+
+
+@frappe.whitelist()
 def cleanup_item_names() -> dict:
     """
     One-time cleanup for existing items:

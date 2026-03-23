@@ -552,6 +552,7 @@ def cleanup_item_names() -> dict:
                 changed = True
 
         if changed:
+            doc.flags.ignore_validate = True
             doc.save(ignore_permissions=True)
             updated += 1
             details.append({

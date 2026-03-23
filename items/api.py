@@ -392,49 +392,94 @@ def _load_pipeline_item_groups() -> dict:
     return group_map
 
 
-@frappe.whitelist()
-def cleanup_debug() -> dict:
-    """Debug: show what cleanup sees for the first 5 items in All Item Groups."""
-    import os
+_DELETE_ITEMS = {
+    "Deleted QB Item 19", "Deleted QB Item 42", "Deleted QB Item 49",
+}
 
-    path = frappe.conf.get("items_pipeline_output_path")
-    csv_exists = False
-    if path:
-        csv_path = os.path.join(path, "item_master.csv")
-        csv_exists = os.path.exists(csv_path)
+_DEPOSIT_KEYWORDS = {"DEPOSIT", "PRESALE DEPOSIT", "PROGRESS DEPOSIT", "LINE DEPOSIT"}
 
-    pipeline_groups = _load_pipeline_item_groups()
+_LABOR_KEYWORDS = [
+    "DETAILING", "SHOP LABOR", "VENDOR LABOR", "PAINT/POWDERCOAT",
+    "POWDERCOATING", "MATERIAL RECYCL",
+]
 
-    items = frappe.get_all(
-        "Item",
-        fields=["name", "item_name", "item_code", "item_group"],
-        filters={"item_group": "All Item Groups"},
-        limit_page_length=5,
-    )
+_CONSUMABLE_KEYWORDS = [
+    "GREASE", "MOLYLUBE", "BRAKE FLUID", "DISTILLED WATER",
+    "WELDING GAS", "ARM SLEEVE", "STEEL IT", "OIL FILTER",
+    "RACING OIL", "HYDRAULIC OIL", "POWER STEERING",
+]
 
-    debug_items = []
-    for item in items:
-        doc = frappe.get_doc("Item", item["name"])
-        suppliers = [s.supplier for s in doc.supplier_items] if doc.supplier_items else []
-        supplier = suppliers[0] if suppliers else ""
-        supplier_in_map = supplier in _SUPPLIER_GROUP_MAP
-        mapped_group = _SUPPLIER_GROUP_MAP.get(supplier, "NOT FOUND")
+_MATERIAL_KEYWORDS = [
+    "ALUMINUM SHEET", "ALUMINUM ROUND", "4130 COND", "3003",
+    "STAINLESS STEEL ROUND TUBING", "MANDREL BENT",
+]
 
-        debug_items.append({
-            "item_name": item["item_name"],
-            "item_group": item["item_group"],
-            "suppliers": suppliers,
-            "supplier_in_map": supplier_in_map,
-            "mapped_group": mapped_group,
-        })
+# Services: expense/fee items and generic QB categories
+_SERVICE_EXACT = {
+    "ACCOUNTING", "ADP PAYROLL FEES", "ALUMICRAFT PART", "APPAREL",
+    "AUTOMOTIVE", "BODIES", "BONUSES", "BUILDING EXPENSES",
+    "BUSINESS PROPERTY",
+    "CALIFORNIA DEPARTMENT OF TAX AND FEE ADMINISTRATION PAYABLE",
+    "CARBON MATERIALS", "CARBON SUPPLIES", "COMPONENTS",
+    "COMPUTER SOFTWARE", "CONSIGNMENT", "CONSULTING", "CONTINGENCY AWARD",
+    "CORPORATE FEES", "COST OF GOODS - AR AP CLEANUP", "CUSTOM ALUMINUM",
+    "CUT MATERIALS", "DESIGN", "DISCOUNT", "DMV", "EMPLOYEE PURCHASE",
+    "EQUIPMENT RENTAL", "EQUIPMENT REPAIR & MAINTENANCE", "EQUIPMENT REPAIRS",
+    "EXHAUST", "FAB", "FEE", "FINANCE CHARGES", "FLOOR", "FREIGHT",
+    "FUEL SURCHARGES", "GAS/ELECTRIC", "GOODS:PART",
+    "HAZARDOUS MATERIAL DISPOSAL", "HEALTH", "HOSTING", "INTERNET",
+    "ITEM", "LEGAL", "LIABILITY", "LICENSES & PERMITS PAID", "MAG",
+    "MAGNETIC TESTING", "MARKETING", "MEALS", "MERCHANT FEES",
+    "OFFICE SUPPLIES", "PART", "PARTNER DISTRIBUTIONS", "PARTS",
+    "PENALTY", "PERMITS/LICENSES/FEES", "POWERSTEERING", "POWERTRAINS",
+    "PRICE ADJUSTMENT", "PROCESSING FEE", "PROCESSING FEES", "PRODUCT",
+    "RACE ADVERTISING", "RAW MATERIALS", "RECOGNIZING REVENUE",
+    "REGISTRATION", "REGULATORS", "RENT & LEASE EXPENSES",
+    "REPAIRS & MAINTENANCE", "ROBOTICS", "SAAS", "SALES",
+    "SALES TAX PAYABLE PAID", "SECURITY", "SERVICE", "SERVICE FEES",
+    "SERVICE-1", "SERVICES", "SHIPPING", "SHIPPING, FREIGHT, & DELIVERY",
+    "SHOCKS", "SHOP", "SHOP SUPPLIES", "SPECIAL PROJECTS", "STATE",
+    "SUBCONTRACT", "SUBCONTRACTORS", "TELEPHONE", "TESTING",
+    "TRASH DISPOSAL", "TRAVEL", "TRIPLE NET", "UPGRADE", "VEHICLE",
+    "WAGES", "WORKMANS COMP", "WIRING",
+}
 
-    return {
-        "pipeline_output_path": path or "NOT SET",
-        "csv_exists": csv_exists,
-        "pipeline_groups_count": len(pipeline_groups),
-        "total_all_item_groups": frappe.db.count("Item", {"item_group": "All Item Groups"}),
-        "sample_items": debug_items,
-    }
+
+def _classify_item_group(item_name: str) -> str | None:
+    """Classify an item into a group based on its name.
+    Returns the group name or None if unclassifiable.
+    """
+    upper = item_name.strip().upper()
+
+    if item_name in _DELETE_ITEMS:
+        return "__DELETE__"
+
+    # Check deposits
+    for kw in _DEPOSIT_KEYWORDS:
+        if kw in upper:
+            return "Deposit"
+
+    # Check exact service matches
+    if upper in _SERVICE_EXACT:
+        return "Services"
+
+    # Check labor keywords
+    for kw in _LABOR_KEYWORDS:
+        if kw in upper:
+            return "Labor"
+
+    # Check consumable keywords
+    for kw in _CONSUMABLE_KEYWORDS:
+        if kw in upper:
+            return "Consumable"
+
+    # Check material keywords
+    for kw in _MATERIAL_KEYWORDS:
+        if kw in upper:
+            return "Material"
+
+    # Default: Part (physical racing component)
+    return "Part"
 
 
 @frappe.whitelist()
@@ -442,9 +487,10 @@ def cleanup_item_names() -> dict:
     """
     One-time cleanup for existing items:
     - Splits part numbers out of item_name into supplier_part_no
-    - Fixes item_group using pipeline data (for items stuck in wrong group)
+    - Fixes item_group based on keyword classification
+    - Deletes known junk items (Deleted QB Items)
     - Leaves item_code untouched so existing links stay intact
-    Returns { updated: N, skipped: N, details: [...] }
+    Returns { updated: N, skipped: N, deleted: N, details: [...] }
     """
     items = frappe.get_all(
         "Item",
@@ -452,11 +498,9 @@ def cleanup_item_names() -> dict:
         limit_page_length=0,
     )
 
-    # Load pipeline group mapping
-    pipeline_groups = _load_pipeline_item_groups()
-
     updated = 0
     skipped = 0
+    deleted = 0
     details = []
 
     for item in items:
@@ -465,6 +509,20 @@ def cleanup_item_names() -> dict:
         changed = False
 
         doc = None
+
+        # Delete known junk
+        if old_name in _DELETE_ITEMS:
+            try:
+                frappe.delete_doc("Item", item["name"], ignore_permissions=True)
+                deleted += 1
+                details.append({
+                    "item_code": item["item_code"],
+                    "action": "deleted",
+                    "old_name": old_name,
+                })
+            except Exception:
+                pass
+            continue
 
         # Fix item_name if part number was split out
         if part_no and clean_name != old_name:
@@ -478,39 +536,27 @@ def cleanup_item_names() -> dict:
                     if not supplier_row.supplier_part_no:
                         supplier_row.supplier_part_no = part_no
 
-        # Fix item_group from pipeline data — try multiple name formats
-        lookup_name = old_name.upper()
-        pipeline_group = pipeline_groups.get(lookup_name)
-        if not pipeline_group and clean_name != old_name:
-            pipeline_group = pipeline_groups.get(clean_name.upper())
-        # Try normalized lookup (strip extra spaces/punctuation)
-        if not pipeline_group:
-            normalized = re.sub(r'[^\w\s]', '', lookup_name).strip()
-            normalized = re.sub(r'\s+', ' ', normalized)
-            for key, group in pipeline_groups.items():
-                key_norm = re.sub(r'[^\w\s]', '', key).strip()
-                key_norm = re.sub(r'\s+', ' ', key_norm)
-                if key_norm == normalized:
-                    pipeline_group = group
-                    break
-        # Fallback: assign group based on supplier
-        if not pipeline_group and item.get("item_group") in ("All Item Groups", ""):
+        # Capitalize item_name if not already ALL CAPS
+        current_name = clean_name if (part_no and clean_name != old_name) else old_name
+        if current_name != current_name.upper():
             doc = doc or frappe.get_doc("Item", item["name"])
-            supplier = ""
-            if doc.supplier_items:
-                supplier = doc.supplier_items[0].supplier or ""
-            pipeline_group = _SUPPLIER_GROUP_MAP.get(supplier)
-
-        if pipeline_group and pipeline_group != item.get("item_group"):
-            doc = doc or frappe.get_doc("Item", item["name"])
-            doc.item_group = pipeline_group
+            doc.item_name = current_name.upper()[:140]
             changed = True
+
+        # Fix item_group if stuck in "All Item Groups" or empty
+        if item.get("item_group") in ("All Item Groups", ""):
+            new_group = _classify_item_group(old_name)
+            if new_group and new_group != "__DELETE__":
+                doc = doc or frappe.get_doc("Item", item["name"])
+                doc.item_group = new_group
+                changed = True
 
         if changed:
             doc.save(ignore_permissions=True)
             updated += 1
             details.append({
                 "item_code": item["item_code"],
+                "action": "updated",
                 "old_name": old_name,
                 "new_name": doc.item_name,
                 "old_group": item.get("item_group"),

@@ -4,7 +4,7 @@ All methods require an authenticated session (@frappe.whitelist() without allow_
 """
 
 import frappe
-from items.csv_parser import parse_csv, build_item_doc, validate_missing, NAMING_SERIES
+from items.csv_parser import parse_csv, build_item_doc, validate_missing
 
 
 @frappe.whitelist()

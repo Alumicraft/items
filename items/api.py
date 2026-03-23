@@ -543,11 +543,22 @@ def cleanup_item_names() -> dict:
             doc.item_name = current_name.upper()[:140]
             changed = True
 
-        # Fix item_code: use sku (supplier part number) if available, otherwise item_name
+        # Fix item_code: use supplier part number if available, otherwise item_name
         doc = doc or frappe.get_doc("Item", item["name"])
         current_code = doc.item_code or ""
-        sku = (doc.sku or "").strip().upper() if hasattr(doc, "sku") else ""
-        desired_code = sku if sku else doc.item_name
+        # Check sku field (old items), then supplier_items child table (new items)
+        spn = ""
+        if hasattr(doc, "sku") and doc.sku:
+            spn = doc.sku.strip().upper()
+        elif doc.supplier_items:
+            for row in doc.supplier_items:
+                if row.supplier_part_no:
+                    spn = row.supplier_part_no.strip().upper()
+                    break
+        # Skip short/generic part numbers (material grades like 4130, 6061)
+        if spn and (len(spn) <= 5 and spn.replace("-", "").replace(".", "").isdigit() or spn.isdigit()):
+            spn = ""
+        desired_code = spn if spn else doc.item_name
         if desired_code and current_code != desired_code:
             doc.item_code = desired_code[:140]
             changed = True

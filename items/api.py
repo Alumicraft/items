@@ -279,20 +279,65 @@ def _split_part_number(name: str) -> tuple:
     return (name, "")
 
 
+def _load_pipeline_item_groups() -> dict:
+    """Load item_group mapping from pipeline item_master.csv.
+
+    Returns dict mapping uppercased item_name → item_group.
+    Reads from the same configured output path as review_queue.
+    """
+    import csv
+    import os
+
+    path = frappe.conf.get("items_pipeline_output_path")
+    if not path:
+        return {}
+
+    csv_path = os.path.join(path, "item_master.csv")
+    if not os.path.exists(csv_path):
+        return {}
+
+    group_map = {}
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        rows = list(reader)
+
+    # Find sentinel row
+    sentinel_idx = None
+    for i, row in enumerate(rows):
+        if row and row[0].strip() == "Start entering data below this line":
+            sentinel_idx = i
+            break
+
+    if sentinel_idx is None:
+        return {}
+
+    for row in rows[sentinel_idx + 1:]:
+        if len(row) >= 5:
+            item_name = row[2].strip().upper()
+            item_group = row[4].strip()
+            if item_name and item_group:
+                group_map[item_name] = item_group
+
+    return group_map
+
+
 @frappe.whitelist()
 def cleanup_item_names() -> dict:
     """
-    One-time cleanup: split part numbers out of existing item names.
-    - Updates item_name to the clean version
-    - Adds supplier_part_no to the Item Supplier child table
+    One-time cleanup for existing items:
+    - Splits part numbers out of item_name into supplier_part_no
+    - Fixes item_group using pipeline data (for items stuck in wrong group)
     - Leaves item_code untouched so existing links stay intact
     Returns { updated: N, skipped: N, details: [...] }
     """
     items = frappe.get_all(
         "Item",
-        fields=["name", "item_name", "item_code"],
+        fields=["name", "item_name", "item_code", "item_group"],
         limit_page_length=0,
     )
+
+    # Load pipeline group mapping
+    pipeline_groups = _load_pipeline_item_groups()
 
     updated = 0
     skipped = 0
@@ -301,29 +346,46 @@ def cleanup_item_names() -> dict:
     for item in items:
         old_name = item.get("item_name") or ""
         clean_name, part_no = _split_part_number(old_name)
+        changed = False
 
-        # Skip if no part number found or name didn't change
-        if not part_no or clean_name == old_name:
+        doc = None
+
+        # Fix item_name if part number was split out
+        if part_no and clean_name != old_name:
+            doc = doc or frappe.get_doc("Item", item["name"])
+            doc.item_name = clean_name.upper()[:140]
+            changed = True
+
+            # Add supplier_part_no to existing supplier rows
+            if doc.supplier_items:
+                for supplier_row in doc.supplier_items:
+                    if not supplier_row.supplier_part_no:
+                        supplier_row.supplier_part_no = part_no
+
+        # Fix item_group from pipeline data
+        lookup_name = old_name.upper()
+        pipeline_group = pipeline_groups.get(lookup_name)
+        # Also try the cleaned name
+        if not pipeline_group and clean_name != old_name:
+            pipeline_group = pipeline_groups.get(clean_name.upper())
+        if pipeline_group and pipeline_group != item.get("item_group"):
+            doc = doc or frappe.get_doc("Item", item["name"])
+            doc.item_group = pipeline_group
+            changed = True
+
+        if changed:
+            doc.save(ignore_permissions=True)
+            updated += 1
+            details.append({
+                "item_code": item["item_code"],
+                "old_name": old_name,
+                "new_name": doc.item_name,
+                "old_group": item.get("item_group"),
+                "new_group": doc.item_group,
+                "supplier_part_no": part_no or "",
+            })
+        else:
             skipped += 1
-            continue
-
-        doc = frappe.get_doc("Item", item["name"])
-        doc.item_name = clean_name.upper()[:140]
-
-        # Add supplier_part_no to existing supplier rows
-        if part_no and doc.supplier_items:
-            for supplier_row in doc.supplier_items:
-                if not supplier_row.supplier_part_no:
-                    supplier_row.supplier_part_no = part_no
-
-        doc.save(ignore_permissions=True)
-        updated += 1
-        details.append({
-            "item_code": item["item_code"],
-            "old_name": old_name,
-            "new_name": clean_name.upper()[:140],
-            "supplier_part_no": part_no,
-        })
 
     frappe.db.commit()
 

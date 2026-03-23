@@ -96,6 +96,7 @@ def build_item_doc(row: dict) -> dict:
 
     doc = {
         "doctype": "Item",
+        "naming_series": "STO-ITEM-.YYYY.-",
         "item_name": item_name,
         "item_group": row["item_group"],
         "stock_uom": row["stock_uom"],

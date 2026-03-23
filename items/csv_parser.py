@@ -112,7 +112,7 @@ def build_item_doc(row: dict) -> dict:
     doc = {
         "doctype": "Item",
         "item_name": item_name,
-        "item_code": item_name,
+        "item_code": _pick_item_code(item_name, row.get("supplier_part_no", "")),
         "item_group": row["item_group"],
         "stock_uom": row["stock_uom"],
         "is_stock_item": is_stock,

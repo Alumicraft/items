@@ -505,32 +505,44 @@ def cleanup_item_names() -> dict:
 
     for item in items:
         old_name = item.get("item_name") or ""
+        item_id = item["name"]
         clean_name, part_no = _split_part_number(old_name)
         changed = False
+        renamed = False
 
         doc = None
 
         # Delete known junk
         if old_name in _DELETE_ITEMS:
             try:
-                frappe.delete_doc("Item", item["name"], ignore_permissions=True)
+                frappe.delete_doc("Item", item_id, ignore_permissions=True)
                 deleted += 1
-                details.append({
-                    "item_code": item["item_code"],
-                    "action": "deleted",
-                    "old_name": old_name,
-                })
+                details.append({"action": "deleted", "old_name": old_name})
             except Exception:
                 pass
             continue
 
+        # Step 1: Rename ID to naming series if it doesn't follow the pattern
+        if not item_id.startswith("STO-ITEM-"):
+            new_id = frappe.model.naming.make_autoname("STO-ITEM-.YYYY.-.#####")
+            try:
+                frappe.rename_doc("Item", item_id, new_id, merge=False)
+                renamed = True
+                item_id = new_id
+            except Exception as e:
+                details.append({
+                    "action": "rename_failed",
+                    "old_id": item["name"],
+                    "error": str(e),
+                })
+                continue
+
+        doc = frappe.get_doc("Item", item_id)
+
         # Fix item_name if part number was split out
         if part_no and clean_name != old_name:
-            doc = doc or frappe.get_doc("Item", item["name"])
             doc.item_name = clean_name.upper()[:140]
             changed = True
-
-            # Add supplier_part_no to existing supplier rows
             if doc.supplier_items:
                 for supplier_row in doc.supplier_items:
                     if not supplier_row.supplier_part_no:
@@ -539,47 +551,42 @@ def cleanup_item_names() -> dict:
         # Capitalize item_name if not already ALL CAPS
         current_name = clean_name if (part_no and clean_name != old_name) else old_name
         if current_name != current_name.upper():
-            doc = doc or frappe.get_doc("Item", item["name"])
             doc.item_name = current_name.upper()[:140]
             changed = True
 
-        # Fix item_code: always set to item_name
-        doc = doc or frappe.get_doc("Item", item["name"])
-        desired_code = doc.item_name.upper()[:140] if doc.item_name else ""
+        # Step 2: Set item_code = sku if available, otherwise item_name
+        sku = (doc.sku or "").strip() if hasattr(doc, "sku") else ""
+        desired_code = sku if sku else doc.item_name
         if desired_code and (doc.item_code or "") != desired_code:
-            doc.item_code = desired_code
+            doc.item_code = desired_code[:140]
             changed = True
 
         # Fix item_group if stuck in "All Item Groups" or empty
-        if item.get("item_group") in ("All Item Groups", ""):
+        if doc.item_group in ("All Item Groups", ""):
             new_group = _classify_item_group(old_name)
             if new_group and new_group != "__DELETE__":
-                doc = doc or frappe.get_doc("Item", item["name"])
                 doc.item_group = new_group
                 changed = True
 
-        if changed:
-            # Fix negative values that block save
+        if changed or renamed:
             if hasattr(doc, "last_purchase_rate") and (doc.last_purchase_rate or 0) < 0:
                 doc.last_purchase_rate = 0
             doc.flags.ignore_validate = True
             doc.save(ignore_permissions=True)
             updated += 1
             details.append({
-                "item_code": item["item_code"],
-                "action": "updated",
-                "old_name": old_name,
-                "new_name": doc.item_name,
-                "old_group": item.get("item_group"),
-                "new_group": doc.item_group,
-                "supplier_part_no": part_no or "",
+                "action": "renamed" if renamed else "updated",
+                "old_id": item["name"],
+                "new_id": item_id,
+                "item_code": doc.item_code,
+                "item_name": doc.item_name,
             })
         else:
             skipped += 1
 
     frappe.db.commit()
 
-    return {"updated": updated, "skipped": skipped, "details": details}
+    return {"updated": updated, "skipped": skipped, "deleted": deleted, "details": details}
 
 
 @frappe.whitelist()

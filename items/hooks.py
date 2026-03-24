@@ -6,6 +6,8 @@ app_email = "admin@alumicraft.com"
 app_license = "MIT"
 app_version = "0.1.0"
 
+app_include_js = "/assets/items/js/item.js"
+
 doc_events = {
     "Item": {
         "before_validate": "items.overrides.item.before_validate"

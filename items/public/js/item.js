@@ -1,13 +1,19 @@
-$(document).on('app_ready', function () {
-    // Make item_code not mandatory in meta — fixes Quick Entry validation
-    frappe.model.with_doctype('Item', function () {
-        var df = frappe.meta.get_docfield('Item', 'item_code');
-        if (df) {
-            df.reqd = 0;
-            df.hidden = 0;
+// Intercept doctype loading — every time Item meta is fetched,
+// strip mandatory from item_code BEFORE the callback runs.
+// This catches Quick Entry which calls with_doctype before rendering.
+var _with_doctype = frappe.model.with_doctype;
+frappe.model.with_doctype = function (doctype, callback, force) {
+    return _with_doctype.call(this, doctype, function () {
+        if (doctype === 'Item') {
+            var df = frappe.meta.get_docfield('Item', 'item_code');
+            if (df) {
+                df.reqd = 0;
+                df.hidden = 0;
+            }
         }
-    });
-});
+        if (callback) callback();
+    }, force);
+};
 
 frappe.ui.form.on('Item', {
     refresh(frm) {

@@ -14,5 +14,19 @@ def before_validate(doc, method):
 
 
 def set_item_code_not_mandatory():
-    frappe.make_property_setter("Item", "item_code", "reqd", 0, "Check")
-    frappe.make_property_setter("Item", "item_code", "hidden", 0, "Check")
+    for prop, value in [("reqd", "0"), ("hidden", "0")]:
+        if not frappe.db.exists("Property Setter", {
+            "doc_type": "Item",
+            "field_name": "item_code",
+            "property": prop,
+        }):
+            ps = frappe.new_doc("Property Setter")
+            ps.doctype_or_field = "DocField"
+            ps.doc_type = "Item"
+            ps.field_name = "item_code"
+            ps.property = prop
+            ps.value = value
+            ps.property_type = "Check"
+            ps.insert(ignore_permissions=True)
+
+    frappe.db.commit()

@@ -15,6 +15,39 @@ frappe.model.with_doctype = function (doctype, callback, force) {
     }, force);
 };
 
+// Custom Quick Entry for Item — live uppercase + auto-fill item_code
+frappe.provide('frappe.ui.form');
+frappe.ui.form.ItemQuickEntryForm = class ItemQuickEntryForm extends frappe.ui.form.QuickEntryForm {
+    render_dialog() {
+        super.render_dialog();
+        var dialog = this.dialog;
+
+        // Live uppercase on item_name + auto-fill item_code
+        dialog.fields_dict.item_name &&
+            dialog.fields_dict.item_name.$input.on('change keyup', function () {
+                var val = dialog.get_value('item_name');
+                if (val) {
+                    var upper = val.toUpperCase();
+                    dialog.set_value('item_name', upper);
+                    var code = dialog.get_value('item_code');
+                    if (!code || code === dialog._last_synced_name) {
+                        dialog.set_value('item_code', upper);
+                    }
+                    dialog._last_synced_name = upper;
+                }
+            });
+
+        // Live uppercase on item_code
+        dialog.fields_dict.item_code &&
+            dialog.fields_dict.item_code.$input.on('change keyup', function () {
+                var val = dialog.get_value('item_code');
+                if (val) {
+                    dialog.set_value('item_code', val.toUpperCase());
+                }
+            });
+    }
+};
+
 frappe.ui.form.on('Item', {
     refresh(frm) {
         frm.set_df_property('item_code', 'hidden', 0);

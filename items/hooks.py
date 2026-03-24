@@ -11,3 +11,5 @@ doc_events = {
         "before_validate": "items.overrides.item.before_validate"
     }
 }
+
+after_migrate = ["items.overrides.item.set_item_code_not_mandatory"]
